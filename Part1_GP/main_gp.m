@@ -24,7 +24,7 @@ u_min = -1;
 u_max = 1;
 
 % noise standard deviation
-wstd = 1e-3;
+wstd = 1e-2;
 
 % initial condition
 x0 = [-9 ; -4.5];
@@ -43,8 +43,11 @@ kernelFunction = 'ardsquaredexponential';
 % 'ardmatern52'             Matern kernel with parameter 5/2 and a separate length scale per predictor.
 % 'ardrationalquadratic'
 
+% input value to hold constant when doing GP predictions wrt (x1,x2)
+u_constant = 0;
+
 % values to hold constant when doing GP predictions wrt x1
-x2_constant = [-3, -1.5, 0];
+x2_constant = [0, -2, -4];
 
 % get plant data under random input and noise values
 X = zeros(2,N+1,Nrepeat);
@@ -95,21 +98,21 @@ Bd = [1 ; 0]; % here we assume we know the subspace that the disturbance lives i
 
 % evaluate the one-step prediction error for all the identification data
 Bd_dagger = pinv(Bd);
-Xdata = [];
+XUdata = [];
 Wdata = [];
 for j = 1:Nrepeat
     for i = 1:N
-        Xdata = [Xdata ; X(:,i,j)'];
+        XUdata = [XUdata ; X(:,i,j)', U(:,i,j)'];
         Wdata = [Wdata ; (Bd_dagger*(X(:,i+1,j) - ( A*X(:,i,j) + B*U(:,i,j) )))'];
     end
 end
 
 % use the prediction error data to train a GP model
-gp = fitrgp(Xdata,Wdata,'KernelFunction',kernelFunction,'Standardize',0);
+gp = fitrgp(XUdata,Wdata,'KernelFunction',kernelFunction,'Standardize',0);
 
 % get the min/max values from the training data
-x_min = min(Xdata);
-x_max = max(Xdata);
+x_min = min(XUdata(:,1:2));
+x_max = max(XUdata(:,1:2));
 
 % specify the grids for the first (x1) and second (x2) state for plotting
 x1_draw = linspace(x_min(1), x_max(1), 101);
@@ -117,7 +120,7 @@ x2_draw = linspace(x_min(2), x_max(2), 101);
 [X1_draw, X2_draw] = meshgrid(x1_draw, x2_draw);
 
 % predict the GP model (mean + std) at the grid points
-[muW_pred, stdW_pred] = predict(gp,[X1_draw(:), X2_draw(:)]);
+[muW_pred, stdW_pred] = predict(gp,[X1_draw(:), X2_draw(:), u_constant*ones(length(x1_draw)*length(x2_draw),1)]);
 muW_pred = reshape(muW_pred, [length(x2_draw), length(x1_draw)]);
 stdW_pred = reshape(stdW_pred, [length(x2_draw), length(x1_draw)]);
 
@@ -125,7 +128,7 @@ stdW_pred = reshape(stdW_pred, [length(x2_draw), length(x1_draw)]);
 figure; hold on
 title(['GP mean, kernel = ' kernelFunction])
 h = surf(X1_draw, X2_draw, muW_pred);
-scatter3(Xdata(:,1), Xdata(:,2), Wdata, 500, '.r')
+scatter3(XUdata(:,1), XUdata(:,2), Wdata, 500, '.r')
 set(h, 'EdgeColor', 'none');
 view(3)
 set(gcf,'color','w');
@@ -140,7 +143,7 @@ colorbar
 figure; hold on
 title(['GP std, kernel = ' kernelFunction])
 h = pcolor(X1_draw, X2_draw, stdW_pred);
-scatter(Xdata(:,1), Xdata(:,2), 500, '.r')
+scatter(XUdata(:,1), XUdata(:,2), 500, '.r')
 for i = 1:length(x2_constant)
     plot(x1_draw, x2_constant(i)*ones(length(x1_draw),1), '-c', 'linewidth', 2)
 end
@@ -154,7 +157,7 @@ colorbar
 % loop over the number of x2_constant values
 for i = 1:length(x2_constant)
     % calculate the GP predictions in x1 for constant x2 value
-    [muw_pred, stdw_pred] = predict(gp,[x1_draw', x2_constant(i)*ones(length(x1_draw),1)]);
+    [muw_pred, stdw_pred] = predict(gp,[x1_draw', x2_constant(i)*ones(length(x1_draw),1), u_constant*ones(length(x1_draw),1)]);
     x1_conf = [x1_draw, x1_draw(end:-1:1)];
     w_conf = [(muw_pred+3*stdw_pred)' (muw_pred(end:-1:1)-3*stdw_pred(end:-1:1))'];
     
